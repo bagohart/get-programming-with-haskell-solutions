@@ -131,13 +131,19 @@ startsWith char string = char == (head string)
 
 x = _where (startsWith 'J' . firstName) (_select studentName students)
 
--- select join [where]
+--                         select   join     [where]
 data HINQ m a b = HINQ (m a -> m b) (m a) (m a -> m a)
                 | HINQ_ (m a -> m b) (m a)
+                | HINQ__ -- for monoid we need empty query
+                | HINQ2 (HINQ m a b) (HINQ m a b) -- for semigroup, we need to store multiple queries in one
+              -- otherwise we would have to frankenstein the single relational algebra elements together
+              -- to build one query, and I'm not sure if that's even valid =/
 
-runHINQ :: (Monad m, Alternative m) => HINQ m a b -> m b
+runHINQ :: (Monad m, Alternative m, Semigroup (m b)) => HINQ m a b -> m b
 runHINQ (HINQ sClause jClause wClause) = _hinq sClause jClause wClause
 runHINQ (HINQ_ sClause jClause) = _hinq sClause jClause (_where (\_ -> True))
+runHINQ (HINQ__) = empty
+runHINQ (HINQ2 q1 q2) = runHINQ q1 <> runHINQ q2
 
 query1 :: HINQ [] (Teacher, Course) Name
 query1 = HINQ (_select (teacherName . fst))
@@ -167,7 +173,11 @@ maybeQuery2 = HINQ (_select (teacherName . fst))
                     (_join possibleTeacher missingCourse teacherId teacher)
                     (_where ((== "French") .courseTitle . snd))
 
--- todo:
--- semigroup
--- monoid
--- empty query
+instance (Semigroup (m a)) => Semigroup (HINQ m a b) where 
+    (<>) q1 q2 = HINQ2 q1 q2
+
+instance (Monoid (m a)) => Monoid (HINQ m a b) where 
+    mempty = HINQ__
+
+-- this sorta works, but it doesn't allow the case where the input data of 2 queries is different, whereas the output data is the same.
+-- I guess, LINQ is probably a bit more sophisticated than this construction :)
